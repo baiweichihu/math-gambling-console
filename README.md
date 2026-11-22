@@ -47,12 +47,22 @@ Worker counts and the GitHub identity are detected at runtime — nothing is mac
 | Workers | 1 … CPU count (max 32), default is half the cores capped at 4 |
 | Time limit | Safety cap, 1–1440 min. The timer counts **up** and you can stop any time; the cap only exists because the runner has no "run forever" mode |
 | Credit name | Self-reported label in submitted issues; locked after the first run |
+| Auto-submit | Off by default. When on, reaching the cap submits the queue and starts the next round by itself |
 
 ## Good to know
 
 - **The 4096 cap.** The runner stops dispatching once 4096 finished-but-unsubmitted tasks pile up.
-  This console never auto-submits, so long runs will reach it. When the state shows **Limit
-  reached**, press **Submit** to clear the queue and continue.
+  By default this console never auto-submits, so long runs will reach it — when the state shows
+  **Limit reached**, press **Submit** to clear the queue. Turn on **Auto-submit** to have that
+  cycle run unattended.
+- **Totals.** The Total tile shows cumulative tasks, banks and inputs. Tasks and banks come from
+  the checkpoint; inputs are summed from `results.jsonl` incrementally, so the figure stays exact
+  without rescanning the file.
+- **Total runtime** accumulates across sessions and is written to `state.json` on every stop,
+  submit and automatic segment. A session killed from the task manager loses at most the last
+  30 seconds.
+- **Network hiccups retry themselves.** If the upstream coverage index cannot be fetched, the
+  console waits and retries up to 4 times with a backoff instead of failing outright.
 - **Submitting is public.** Each result bundle becomes a public GitHub issue carrying your credit
   name, username and task digests. It cannot be undone.
 - **Stopping is graceful.** The console broadcasts a console Ctrl+C to the runner, which then drains
