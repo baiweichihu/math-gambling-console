@@ -80,8 +80,9 @@
 
   /* 4. details */
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-  .stat{background:var(--soft);border-radius:9px;padding:13px 8px;text-align:center;
-    display:flex;flex-direction:column;justify-content:center;min-height:74px}
+  .stat{position:relative;background:var(--soft);border-radius:9px;padding:13px 8px;
+    text-align:center;display:flex;flex-direction:column;justify-content:center;
+    min-height:74px}
   .stat .k{color:var(--dim);font-size:11px;letter-spacing:.2px;margin-bottom:5px}
   .stat .v{font-size:21px;font-weight:650;font-variant-numeric:tabular-nums}
 
@@ -90,16 +91,16 @@
     margin-bottom:5px}
   .totalHead .k{margin:0}
   .info{
-    position:relative;display:inline-flex;align-items:center;justify-content:center;
+    display:inline-flex;align-items:center;justify-content:center;
     width:14px;height:14px;border-radius:50%;border:1px solid #c3cad4;
     color:var(--faint);font-size:9.5px;font-weight:700;font-style:italic;
     line-height:1;cursor:help;user-select:none;flex:0 0 auto;
   }
   .info:hover{border-color:var(--accent);color:var(--accent)}
   .info .tip{
-    position:absolute;left:50%;top:calc(100% + 9px);transform:translateX(-50%);
+    position:absolute;left:50%;top:calc(100% + 7px);transform:translateX(-50%);
     display:none;z-index:60;
-    background:#1b1f24;color:#e8eef6;border-radius:8px;padding:10px 13px;
+    background:#1b1f24;color:#e8eef6;border-radius:8px;padding:11px 14px;
     box-shadow:0 8px 24px rgba(16,24,40,.28);cursor:default;
   }
   .info:hover .tip{display:block}
@@ -109,7 +110,7 @@
   }
   .info .tip pre{
     margin:0;color:inherit;
-    font:11px/1.7 ui-monospace,"SF Mono","Cascadia Code",Consolas,monospace;
+    font:11.5px/1.75 ui-monospace,"SF Mono","Cascadia Code",Consolas,monospace;
   }
 
   /* alert strip */
