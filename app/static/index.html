@@ -79,11 +79,24 @@
 
   /* 4. details */
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-  .stat{background:var(--soft);border-radius:9px;padding:13px 8px;text-align:center}
+  .stat{background:var(--soft);border-radius:9px;padding:13px 8px;text-align:center;
+    display:flex;flex-direction:column;justify-content:center;min-height:74px}
   .stat .k{color:var(--dim);font-size:11px;letter-spacing:.2px;margin-bottom:5px}
   .stat .v{font-size:21px;font-weight:650;font-variant-numeric:tabular-nums}
-  .stat .sub2{color:var(--faint);font-size:10.5px;margin-top:3px;
-    font-variant-numeric:tabular-nums;line-height:1.35}
+
+  /* split total: numbers on one row, labels aligned underneath */
+  .totalGrid{
+    display:grid;
+    grid-template-columns:auto auto auto auto auto;
+    justify-content:center;
+    align-items:baseline;
+    column-gap:5px;
+    row-gap:1px;
+    font-variant-numeric:tabular-nums;
+  }
+  .totalGrid .n{font-size:18px;font-weight:700;letter-spacing:-.2px;white-space:nowrap}
+  .totalGrid .sep{font-size:14px;color:var(--faint);font-weight:400}
+  .totalGrid .l{font-size:10px;color:var(--faint);text-align:center;white-space:nowrap}
 
   /* alert strip */
   .alert{
@@ -226,6 +239,14 @@
     display:none;max-width:80vw;box-shadow:0 6px 20px rgba(16,24,40,.12);
   }
   #toast.ok{border-color:#bbf7d0;color:var(--green);background:#f0fdf4}
+  /* keep the split total on one line in the narrow-but-not-stacked range */
+  @media (max-width:880px) and (min-width:721px){
+    .totalGrid .n{font-size:16px}
+    .totalGrid .sep{font-size:12px}
+    .totalGrid{column-gap:4px}
+    .totalGrid .l{font-size:9.5px}
+  }
+
   @media (max-width:720px){
     .stats{grid-template-columns:repeat(2,1fr)}
     .grid3{grid-template-columns:1fr}
@@ -285,8 +306,14 @@
       <div class="stat"><div class="k">Submitted</div><div class="v" id="submitted">0</div></div>
       <div class="stat">
         <div class="k">Total</div>
-        <div class="v" id="totalTasks">0</div>
-        <div class="sub2"><span id="totalBanks">0</span> banks<br><span id="totalInputs">0</span> inputs</div>
+        <div class="totalGrid">
+          <span class="n" id="totalBanks">0</span><span class="sep">/</span>
+          <span class="n" id="totalTasks">0</span><span class="sep">/</span>
+          <span class="n" id="totalInputs">0</span>
+          <span class="l">banks</span><span></span>
+          <span class="l">tasks</span><span></span>
+          <span class="l">inputs</span>
+        </div>
       </div>
     </div>
     <div class="bar" id="capbar"><i id="capfill"></i></div>
@@ -389,6 +416,7 @@ const fmt = n => (n || 0).toLocaleString("en-US");
 function compact(n){
   n = n || 0;
   const trim = (v, d) => v.toFixed(d).replace(/\.?0+$/, "");
+  if (n >= 1e12) return trim(n / 1e12, 2) + " T";
   if (n >= 1e9) return trim(n / 1e9, 2) + " B";
   if (n >= 1e6) return trim(n / 1e6, 2) + " M";
   if (n >= 1e4) return trim(n / 1e3, 1) + " K";
