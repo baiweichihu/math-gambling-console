@@ -6,8 +6,9 @@
 /SHA256SUMS.txt
 
 # Local runtime state. These files hold your credit name, your GitHub
-# username and the actual computation results.
+# username, the accumulated runtime and the actual computation results.
 /config.json
+/state.json
 /logs/
 /app/.instance.json
 /math-gambling-run/
