@@ -55,11 +55,12 @@ Worker counts and the GitHub identity are detected at runtime — nothing is mac
   By default this console never auto-submits, so long runs will reach it — when the state shows
   **Limit reached**, press **Submit** to clear the queue. Turn on **Auto-submit** to have that
   cycle run unattended.
-- **Totals.** The Total tile shows cumulative tasks, banks and inputs. Tasks and banks come from
-  the checkpoint; inputs are summed from `results.jsonl` incrementally, so the figure stays exact
-  without rescanning the file.
-- **Total runtime** accumulates across sessions and is written to `state.json` on every stop,
-  submit and automatic segment. A session killed from the task manager loses at most the last
+- **Totals.** The Total tile shows the cumulative task count; hover the ⓘ next to it for the bank
+  and input counts. Tasks and banks come from the checkpoint, inputs are summed from
+  `results.jsonl` incrementally, so the figures stay exact without rescanning the file.
+- **Total CPU time** is the sum of each segment's wall-clock duration multiplied by the worker
+  count it used, so twelve cores for one hour counts as twelve hours. It accumulates across
+  sessions in `state.json`; a session killed from the task manager loses at most the last
   30 seconds.
 - **Network hiccups retry themselves.** If the upstream coverage index cannot be fetched, the
   console waits and retries up to 4 times with a backoff instead of failing outright.

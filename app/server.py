@@ -113,23 +113,31 @@ def save_state():
         pass
 
 
-def total_seconds():
+def total_cpu_seconds():
+    """Accumulated core-seconds. Falls back to the old wall-clock key."""
     with _STATE_LOCK:
+        if "cpu_seconds" in _STATE:
+            return float(_STATE.get("cpu_seconds") or 0.0)
         return float(_STATE.get("total_seconds") or 0.0)
 
 
-def add_elapsed(seconds):
+def add_elapsed(seconds, workers=1):
+    """Record a finished segment, weighted by the number of cores it used."""
     if not seconds or seconds <= 0:
         return
+    cores = max(1, int(workers or 1))
     with _STATE_LOCK:
-        _STATE["total_seconds"] = round(float(_STATE.get("total_seconds") or 0.0) + seconds, 3)
+        base = float(_STATE.get("cpu_seconds", _STATE.get("total_seconds") or 0.0) or 0.0)
+        _STATE["cpu_seconds"] = round(base + seconds * cores, 3)
+        _STATE.pop("total_seconds", None)
         _STATE["sessions"] = int(_STATE.get("sessions") or 0) + 1
         save_state()
 
 
-def set_in_progress(seg, seconds):
+def set_in_progress(seg, seconds, workers=1):
+    cores = max(1, int(workers or 1))
     with _STATE_LOCK:
-        _STATE["in_progress"] = {"seg": seg, "seconds": round(seconds, 3)}
+        _STATE["in_progress"] = {"seg": seg, "seconds": round(seconds * cores, 3)}
         save_state()
 
 
@@ -462,8 +470,9 @@ class Console:
                 with self.lock:
                     alive = self.proc is not None and self.proc.poll() is None
                     seg = self.seg_id
+                    cores = self.workers
                 if alive and seg:
-                    set_in_progress(seg, self._elapsed())
+                    set_in_progress(seg, self._elapsed(), cores)
             except Exception:                      # never let the heartbeat die
                 pass
 
@@ -695,10 +704,11 @@ class Console:
             minutes = self.minutes
             auto_next = self.auto_pending
             recent = "\n".join(list(self.log)[-40:])
+            cores_used = 1 if mode == "submit" else self.workers
 
         self._emit(f">> process exited with code {rc}")
         if elapsed > 0:
-            add_elapsed(elapsed)
+            add_elapsed(elapsed, cores_used)
             clear_in_progress()
 
         if mode == "submit":
@@ -819,15 +829,15 @@ class Console:
         if not running and stats:
             snap["counter"]["tasks_done"] = max(0, stats["total_tasks"] - tasks_at_start)
         counters = scan_totals()
-        elapsed_total = total_seconds()
+        cpu_total = total_cpu_seconds()
         with self.lock:
             error_kind = self.error_kind
             auto_pending = self.auto_pending
             attempts = self.retry_attempts
         snap.update({
             "runtime": {
-                "total_seconds": round(elapsed_total, 1),
-                "total_hours": round(elapsed_total / 3600.0, 2),
+                "cpu_seconds": round(cpu_total, 1),
+                "total_hours": round(cpu_total / 3600.0, 2),
             },
             "totals": {
                 "tasks": (stats or {}).get("total_tasks", 0),
