@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Math Gambling</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#ffffff; --soft:#f7f8fa; --line:#e4e7ec;
+    --fg:#1b1f24; --dim:#6b7280; --faint:#9aa3af;
+    --accent:#2563eb; --accent-h:#1d4ed8;
+    --red:#dc2626; --red-h:#b91c1c;
+    --green:#15803d; --amber:#b45309;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,
+      "Helvetica Neue",Arial,sans-serif;
+    font-size:14px;line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    display:flex;justify-content:center;padding:20px 20px 40px;
+  }
+  .wrap{width:100%;max-width:820px;position:relative}
+
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:20px 22px;margin-bottom:12px;
+    box-shadow:0 1px 2px rgba(16,24,40,.04);
+  }
+
+  /* 1. header */
+  .head{position:relative;text-align:center;padding:22px 110px 20px}
+  .head h1{margin:0;font-size:19px;font-weight:650;letter-spacing:-.2px}
+  .head .sub{margin-top:6px;color:var(--dim);font-size:12.5px}
+  .head .sub b{color:var(--fg);font-weight:600}
+
+  /* 3. quit */
+  .quit{
+    position:absolute;top:50%;right:14px;transform:translateY(-50%);z-index:10;
+    display:inline-flex;align-items:center;gap:7px;
+    background:var(--red);color:#fff;border:1px solid var(--red-h);
+    border-radius:9px;padding:8px 14px;font:inherit;font-weight:600;font-size:13px;
+    cursor:pointer;box-shadow:0 1px 3px rgba(220,38,38,.28);
+  }
+  .quit:hover{background:var(--red-h)}
+  .quit svg{display:block}
+
+  /* 2. timer row */
+  .timerRow{display:flex;align-items:center;justify-content:space-between;gap:14px}
+  .timer{
+    font-family:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",
+      Consolas,"Liberation Mono",monospace;
+    font-size:46px;font-weight:500;letter-spacing:.5px;line-height:1.05;
+    font-variant-numeric:tabular-nums;
+  }
+  .pill{
+    font-size:12px;font-weight:600;padding:4px 11px;border-radius:999px;
+    border:1px solid var(--line);background:var(--soft);color:var(--dim);
+    white-space:nowrap;
+  }
+  .pill.on{color:var(--green);border-color:#bbf7d0;background:#f0fdf4}
+  .pill.warn{color:var(--amber);border-color:#fde68a;background:#fffbeb}
+  .pill.bad{color:var(--red);border-color:#fecaca;background:#fef2f2}
+
+  .btns{display:flex;gap:10px;margin-top:18px}
+  .btns button{
+    flex:1;padding:10px 16px;border-radius:9px;font:inherit;font-weight:600;
+    border:1px solid var(--line);background:var(--soft);color:var(--fg);cursor:pointer;
+    transition:background .15s,border-color .15s;
+  }
+  .btns button:hover:not(:disabled){background:#eef0f4;border-color:#d5dae1}
+  .btns button:disabled{opacity:.42;cursor:not-allowed}
+  .btns button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btns button.primary:hover:not(:disabled){background:var(--accent-h)}
+  .btns button.danger{color:var(--red);border-color:#f3c8c8;background:#fef6f6}
+  .btns button.danger:hover:not(:disabled){background:#fdeaea}
+
+  /* 4. details */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .stat{background:var(--soft);border-radius:9px;padding:13px 8px;text-align:center}
+  .stat .k{color:var(--dim);font-size:11px;letter-spacing:.2px;margin-bottom:5px}
+  .stat .v{font-size:21px;font-weight:650;font-variant-numeric:tabular-nums}
+  .bar{height:7px;border-radius:4px;background:#eceff3;overflow:hidden;margin-top:16px}
+  .bar > i{display:block;height:100%;width:0;background:var(--accent);
+    border-radius:4px;transition:width .45s ease}
+  .bar.warn > i{background:#f59e0b}
+  .bar.bad > i{background:var(--red)}
+  .hint{color:var(--faint);font-size:11.5px;text-align:center;margin-top:9px}
+
+  /* 5. settings */
+  .secTitle{font-size:11px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;
+    color:var(--faint);margin-bottom:14px}
+  .grid3{display:grid;grid-template-columns:1.15fr 1fr 1.15fr;gap:20px}
+  .field{min-width:0}
+  .field label{display:block;font-size:12px;color:var(--dim);margin-bottom:7px}
+  .valRow{display:flex;align-items:baseline;justify-content:space-between;
+    margin-bottom:7px}
+  .valRow span:first-child{font-size:12px;color:var(--dim)}
+  .valRow b{font-size:15px;font-weight:650;font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent);margin:0;height:20px}
+  input[type=number],input[type=text]{
+    width:100%;background:var(--soft);border:1px solid var(--line);border-radius:8px;
+    color:var(--fg);padding:8px 10px;font:inherit;outline:none;
+  }
+  input[type=number]:focus,input[type=text]:focus{
+    border-color:var(--accent);background:#fff;
+    box-shadow:0 0 0 3px rgba(37,99,235,.12);
+  }
+  input:disabled{opacity:.55;cursor:not-allowed}
+  .field .tiny{color:var(--faint);font-size:11px;margin-top:6px}
+
+  /* 6. log */
+  .logHead{display:flex;justify-content:space-between;align-items:baseline;
+    margin-bottom:10px}
+  .logHead .secTitle{margin:0}
+  #ver{color:var(--faint);font-size:11px}
+  #log{
+    background:var(--soft);border:1px solid var(--line);border-radius:9px;
+    padding:12px 14px;height:230px;overflow:auto;margin:0;
+    font-family:ui-monospace,"SF Mono","Cascadia Code",Consolas,monospace;
+    font-size:11.5px;line-height:1.65;color:#4b5563;
+    white-space:pre-wrap;word-break:break-all;
+  }
+  #log .hl{color:var(--accent);font-weight:600}
+  #log .ok{color:var(--green)}
+  #log .bad{color:var(--red)}
+
+  /* discovery banner */
+  .banner{
+    margin:14px auto 0;padding:8px 12px;border-radius:8px;font-size:12.5px;
+    background:#fffbeb;border:1px solid #fde68a;color:#92400e;
+    display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;
+    max-width:520px;
+  }
+  .banner[hidden]{display:none}
+  .banner code{font-size:11.5px;color:#78350f}
+  .banner button{
+    padding:3px 11px;border-radius:6px;border:1px solid #d97706;background:#fff;
+    color:#92400e;font:inherit;font-size:12px;font-weight:600;cursor:pointer;
+  }
+  .banner button:hover{background:#fef3c7}
+
+  /* discovery veil */
+  .veil{
+    position:fixed;inset:0;z-index:9999;display:flex;align-items:flex-start;
+    justify-content:center;overflow:auto;padding:44px 18px;
+    background:radial-gradient(circle at 50% 0%,#1c2942 0%,#0a0e15 62%);
+    color:#e8eef6;
+  }
+  .veil[hidden]{display:none}
+  .veilCard{width:100%;max-width:900px;margin:auto}
+  .veilTag{
+    text-align:center;font-size:11.5px;font-weight:700;letter-spacing:3.2px;
+    color:#5ed08a;text-transform:uppercase;
+  }
+  .veil h2{
+    margin:10px 0 24px;text-align:center;font-size:25px;font-weight:650;
+    letter-spacing:-.3px;color:#fff;
+  }
+  .vline{
+    display:flex;gap:14px;align-items:baseline;
+    padding:12px 16px;margin-bottom:8px;border-radius:10px;
+    background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.08);
+    font-family:ui-monospace,"SF Mono","Cascadia Code",Consolas,monospace;
+    overflow-x:auto;
+  }
+  .vlab{color:#8aa2bd;font-size:15px;flex:0 0 auto}
+  .vnum{font-size:17px;word-break:break-all;color:#fff;line-height:1.45}
+  .check{margin:20px 0 4px;text-align:center;font-size:13.5px;font-weight:600}
+  .check.good{color:#5ed08a}
+  .check.bad{color:#ff8b7e}
+  .veilMeta{text-align:center;color:#8aa2bd;font-size:12px;line-height:1.9;margin-top:8px}
+  .veilMeta code{color:#c8d6e5}
+  .veilBtns{display:flex;gap:10px;margin-top:26px;flex-wrap:wrap}
+  .veilBtns button{
+    flex:1;min-width:150px;padding:11px 16px;border-radius:9px;font:inherit;
+    font-weight:600;cursor:pointer;border:1px solid rgba(255,255,255,.16);
+    background:rgba(255,255,255,.08);color:#e8eef6;
+  }
+  .veilBtns button:hover{background:rgba(255,255,255,.15)}
+  .veilBtns button.primary{background:#1f6feb;border-color:#1f6feb;color:#fff}
+  .veilBtns button.primary:hover{background:#2b7bf5}
+
+  #toast{
+    position:fixed;left:50%;transform:translateX(-50%);bottom:26px;
+    background:#fff;border:1px solid #fecaca;color:var(--red);
+    padding:10px 18px;border-radius:10px;font-size:13px;font-weight:500;
+    display:none;max-width:80vw;box-shadow:0 6px 20px rgba(16,24,40,.12);
+  }
+  #toast.ok{border-color:#bbf7d0;color:var(--green);background:#f0fdf4}
+  @media (max-width:720px){
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .grid3{grid-template-columns:1fr}
+    .timer{font-size:38px}
+    body{padding:14px 14px 32px}
+    .head{padding:20px 60px}
+    .quit{padding:8px;gap:0}
+    .quit span{display:none}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- 1 -->
+  <header class="card head">
+    <h1>Math Gambling</h1>
+    <div class="sub" id="sub">Local console</div>
+    <div class="banner" id="banner" hidden>
+      SOLUTION FOUND · <code id="bannerBank"></code>
+      <button id="btnShowVeil">View</button>
+    </div>
+    <button class="quit" id="btnQuit" title="Quit console">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+           stroke-width="2.2" stroke-linecap="round">
+        <path d="M12 2.6v9"/>
+        <path d="M18.4 6.4a9 9 0 1 1-12.8 0"/>
+      </svg>
+      <span>Quit</span>
+    </button>
+  </header>
+
+  <!-- 2 -->
+  <section class="card">
+    <div class="timerRow">
+      <div class="timer" id="timer">00:00:00</div>
+      <span class="pill" id="pill">Idle</span>
+    </div>
+    <div class="btns">
+      <button id="btnStart" class="primary">Start</button>
+      <button id="btnStop" class="danger">Stop</button>
+      <button id="btnSubmit">Submit</button>
+    </div>
+  </section>
+
+  <!-- 4 -->
+  <section class="card">
+    <div class="stats">
+      <div class="stat"><div class="k">Done this run</div><div class="v" id="tasks">0</div></div>
+      <div class="stat"><div class="k">Pending results</div><div class="v" id="banks">0</div></div>
+      <div class="stat"><div class="k">Submitted</div><div class="v" id="submitted">0</div></div>
+      <div class="stat"><div class="k">Total done</div><div class="v" id="total">0</div></div>
+    </div>
+    <div class="bar" id="capbar"><i id="capfill"></i></div>
+    <div class="hint" id="caphint">Local unsubmitted tasks 0 / 4096</div>
+  </section>
+
+  <!-- 5 -->
+  <section class="card">
+    <div class="secTitle">Settings</div>
+    <div class="grid3">
+      <div class="field">
+        <div class="valRow"><span>Workers</span><b id="wv">4</b></div>
+        <input type="range" id="workers" min="1" max="16" step="1" value="4">
+        <div class="tiny" id="whint">1 – 16 cores</div>
+      </div>
+      <div class="field">
+        <label for="minutes">Time limit (min)</label>
+        <input type="number" id="minutes" min="1" max="1440" step="1" value="1440">
+        <div class="tiny">Safety cap only</div>
+      </div>
+      <div class="field">
+        <label for="name">Credit name</label>
+        <input type="text" id="name" maxlength="80" placeholder="Your name">
+        <div class="tiny" id="namehint">Locked after first run</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 -->
+  <section class="card">
+    <div class="logHead">
+      <div class="secTitle">Run log</div>
+      <span id="ver"></span>
+    </div>
+    <pre id="log"></pre>
+  </section>
+
+</div>
+
+<div class="veil" id="veil" hidden>
+  <div class="veilCard">
+    <div class="veilTag">Solution found</div>
+    <h2>x³ + y³ + z³ = 114</h2>
+    <div id="triple"></div>
+    <div class="check" id="check"></div>
+    <div class="veilMeta" id="veilMeta"></div>
+    <div class="veilBtns">
+      <button id="btnCopy">Copy numbers</button>
+      <button id="btnVeilSubmit" class="primary">Submit to GitHub</button>
+      <button id="btnVeilClose">Dismiss</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const TOKEN = "__TOKEN__";
+let S = null, busy = false, toastTimer = null;
+
+/* Once the user edits a setting it is never overwritten by polling again. */
+const touched = { workers: false, minutes: false, name: false };
+
+/* Discovery overlay state */
+const DISMISS_KEY = "mg_dismissed_discoveries";
+let dismissed = new Set();
+try { dismissed = new Set(JSON.parse(localStorage.getItem(DISMISS_KEY) || "[]")); }
+catch (e) { dismissed = new Set(); }
+const notified = new Set();
+let currentDiscovery = null;
+let veilOpen = false;
+
+const $ = id => document.getElementById(id);
+
+function toast(msg, kind){
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = kind === "ok" ? "ok" : "";
+  t.style.display = "block";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.style.display = "none", 4500);
+}
+
+const fmt = n => (n || 0).toLocaleString("en-US");
+
+function hms(sec){
+  sec = Math.max(0, Math.floor(sec || 0));
+  const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60), s = sec%60;
+  return [h,m,s].map(x => String(x).padStart(2,"0")).join(":");
+}
+
+/* The timer runs locally: the elapsed value from the server only resets
+   the base, and the display advances on a local high-resolution clock,
+   so it is independent of the 1.5s polling interval. */
+let clockBase = 0, clockAt = 0, clockRun = false;
+
+function setClock(elapsed, running){
+  clockBase = elapsed || 0;
+  clockAt = performance.now();
+  clockRun = !!running;
+}
+
+function tickClock(){
+  const v = clockRun ? clockBase + (performance.now() - clockAt) / 1000 : clockBase;
+  $("timer").textContent = hms(v);
+}
+
+/* ---------------- discovery overlay ---------------- */
+
+function tripleHtml(xyz){
+  return [["x", xyz[0]], ["y", xyz[1]], ["z", xyz[2]]].map(
+    ([lab, v]) => `<div class="vline"><span class="vlab">${lab} =</span>` +
+                  `<span class="vnum">${esc(v)}</span></div>`
+  ).join("");
+}
+
+/* BigInt is required: x/y/z are far beyond 2^53 and Number would be wrong. */
+function verifyTriple(xyz){
+  try{
+    const [x, y, z] = xyz.map(v => BigInt(v));
+    return x*x*x + y*y*y + z*z*z === 114n;
+  }catch(e){ return null; }
+}
+
+function openVeil(d){
+  currentDiscovery = d;
+  $("triple").innerHTML = tripleHtml(d.xyz);
+  const ok = verifyTriple(d.xyz);
+  const chk = $("check");
+  chk.className = "check " + (ok ? "good" : "bad");
+  chk.textContent = ok === null
+    ? "could not verify locally"
+    : ok ? "x³ + y³ + z³ = 114  ✓  (exact integer check passed)"
+         : "x³ + y³ + z³ ≠ 114  ✗  (do not trust this screen)";
+  const fresh = S && S.status === "found";
+  $("veilMeta").innerHTML =
+    `<code>${esc(d.bank)}</code><br>` +
+    (fresh ? "found this run" : "recovered from an earlier session") +
+    " · not yet verified by upstream";
+  $("veil").hidden = false;
+  veilOpen = true;
+  document.body.style.overflow = "hidden";
+}
+
+function closeVeil(){
+  $("veil").hidden = true;
+  veilOpen = false;
+  document.body.style.overflow = "";
+}
+
+function announce(d){
+  if (notified.has(d.id)) return;
+  notified.add(d.id);
+  try{
+    if (window.Notification && Notification.permission === "granted"){
+      new Notification("Solution found", {
+        body: "x³ + y³ + z³ = 114 — open the console to inspect",
+        tag: d.id,
+        requireInteraction: true
+      });
+    }
+  }catch(e){ /* no notifications: the overlay alone is enough */ }
+}
+
+async function doSubmit(){
+  const n = S && S.db ? S.db.pending_banks : 0;
+  const ok = confirm(
+    `Submit ${n} result bundle(s) to the upstream GitHub repository ` +
+    `(up to 256 tasks each).\n\n` +
+    `This publishes public issues under your GitHub account — your credit name, ` +
+    `username, task parameters and digests. It cannot be undone.\n\nSubmit now?`
+  );
+  if (!ok) return;
+  busy = true;
+  try{
+    const r = await post("/api/submit");
+    if (!r.ok) toast(r.error);
+  } finally { busy = false; poll(); }
+}
+
+async function post(path, body){
+  const r = await fetch(path, {
+    method:"POST",
+    headers:{"Content-Type":"application/json","X-Token":TOKEN},
+    body: JSON.stringify(body || {})
+  });
+  return r.json();
+}
+
+function pillOf(st){
+  return {
+    idle:        ["Idle", ""],
+    running:     ["Running", "on"],
+    stopping:    ["Stopping…", "warn"],
+    submitting:  ["Submitting…", "warn"],
+    paused_cap:  ["Limit reached", "warn"],
+    found:       ["Discovery!", "on"],
+    error:       ["Error", "bad"]
+  }[st] || [st, ""];
+}
+
+function render(s){
+  S = s;
+  const st = s.status, running = s.running;
+
+  const [txt, cls] = pillOf(st);
+  const pill = $("pill");
+  pill.textContent = txt;
+  pill.className = "pill " + cls;
+
+  setClock(s.elapsed, running);
+  $("tasks").textContent = fmt(s.counter.tasks_done);
+  $("banks").textContent = fmt(s.db ? s.db.pending_banks : 0);
+  $("submitted").textContent = fmt(s.db ? s.db.submitted_banks : 0);
+  $("total").textContent = fmt(s.db ? s.db.total_tasks : 0);
+
+  const unbanked = s.db ? s.db.unbanked : 0;
+  const limit = s.limits.outbox_limit;
+  const pct = Math.min(100, unbanked / limit * 100);
+  $("capfill").style.width = pct + "%";
+  $("capbar").className = "bar" + (pct >= 75 ? " bad" : pct >= 50 ? " warn" : "");
+  let capHint = `Local unsubmitted tasks ${fmt(unbanked)} / ${fmt(limit)}`;
+  if (pct >= 75) capHint += " — computing stops at the limit; submit to continue";
+  $("caphint").textContent = capHint;
+
+  // Settings: locked while the runner is alive.
+  // Once the user edits a setting the server value must not overwrite it.
+  const w = $("workers");
+  w.max = s.limits.max_workers;
+  w.disabled = running;
+  if (!touched.workers) w.value = s.workers;
+  $("wv").textContent = w.value;
+  $("whint").textContent = `1 – ${s.limits.max_workers} cores`;
+
+  const mi = $("minutes");
+  mi.disabled = running;
+  if (!touched.minutes) mi.value = s.minutes;
+
+  const ni = $("name");
+  ni.disabled = running || !!s.paths.db;
+  if (!touched.name) ni.value = s.name || s.display_name || "";
+  $("namehint").textContent = s.paths.db
+    ? "Locked — stored in checkpoint"
+    : "Locked after first run";
+
+  // discovery
+  const disc = (s.db && s.db.discoveries && s.db.discoveries[0]) || null;
+  $("banner").hidden = !disc;
+  if (disc){
+    $("bannerBank").textContent = disc.bank;
+    announce(disc);
+    if (!veilOpen && !dismissed.has(disc.id)) openVeil(disc);
+  } else if (veilOpen){
+    closeVeil();
+  }
+
+  $("btnStart").disabled = running || !s.paths.runner;
+  $("btnStop").disabled = !running;
+  $("btnSubmit").disabled = running || !s.github || !(s.db && s.db.pending_banks > 0);
+
+  const who = s.github
+    ? "@" + s.github + (s.display_name && s.display_name !== s.github
+        ? " · " + s.display_name : "")
+    : "";
+  $("sub").innerHTML = !s.paths.runner
+    ? 'Runner not found — unzip the release into <b>math-gambling/</b>'
+    : who
+      ? 'Signed in as <b>' + esc(who) + '</b>'
+      : 'GitHub CLI not authenticated — you can compute but not submit';
+
+  $("ver").textContent = s.version ? "runner v" + s.version : "";
+
+  const log = $("log");
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  log.innerHTML = s.log.map(esc).join("\n");
+  if (atBottom) log.scrollTop = log.scrollHeight;
+
+  if (st === "error" && s.last_error) toast(s.last_error);
+}
+
+function esc(line){
+  const t = String(line).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  let cls = "";
+  if (line.startsWith("$ ") || line.startsWith(">> ")) cls = "hl";
+  else if (/EXACT|Submitted:/.test(line)) cls = "ok";
+  else if (/failed|rejected|Error|error/.test(line)) cls = "bad";
+  return cls ? `<span class="${cls}">${t}</span>` : t;
+}
+
+async function poll(){
+  if (busy) return;
+  try{
+    const r = await fetch("/api/state", {cache:"no-store"});
+    render(await r.json());
+  }catch(e){ /* server not up yet */ }
+}
+
+$("workers").addEventListener("input", e => {
+  touched.workers = true;
+  $("wv").textContent = e.target.value;
+});
+$("minutes").addEventListener("input", () => { touched.minutes = true; });
+$("name").addEventListener("input", () => { touched.name = true; });
+
+$("btnStart").addEventListener("click", async () => {
+  // Notification permission must be requested inside a user gesture.
+  if (window.Notification && Notification.permission === "default"){
+    try { await Notification.requestPermission(); } catch(e){}
+  }
+  busy = true;
+  try{
+    const r = await post("/api/start", {
+      workers: +$("workers").value,
+      minutes: +$("minutes").value,
+      name: $("name").value
+    });
+    if (!r.ok) toast(r.error);
+  } finally { busy = false; poll(); }
+});
+
+$("btnStop").addEventListener("click", async () => {
+  busy = true;
+  try{
+    const r = await post("/api/stop");
+    if (!r.ok) toast(r.error);
+  } finally { busy = false; poll(); }
+});
+
+$("btnSubmit").addEventListener("click", doSubmit);
+$("btnVeilSubmit").addEventListener("click", doSubmit);
+
+$("btnShowVeil").addEventListener("click", () => {
+  const d = currentDiscovery || (S && S.db && S.db.discoveries && S.db.discoveries[0]);
+  if (d) openVeil(d);
+});
+
+$("btnVeilClose").addEventListener("click", () => {
+  if (!confirm("Dismiss this result screen?\n\n" +
+               "The result is still saved in local files and can be reopened " +
+               "from the banner at the top.")) return;
+  if (currentDiscovery){
+    dismissed.add(currentDiscovery.id);
+    try { localStorage.setItem(DISMISS_KEY, JSON.stringify([...dismissed])); } catch(e){}
+  }
+  closeVeil();
+});
+
+$("btnCopy").addEventListener("click", async () => {
+  if (!currentDiscovery) return;
+  const [x, y, z] = currentDiscovery.xyz;
+  try{
+    await navigator.clipboard.writeText(`x = ${x}\ny = ${y}\nz = ${z}`);
+    toast("Copied to clipboard", "ok");
+  }catch(e){
+    toast("Copy blocked by the browser — select the numbers manually");
+  }
+});
+
+$("btnQuit").addEventListener("click", async () => {
+  const msg = S && S.running
+    ? "The runner is still working. Quitting stops it first — finished results are kept.\n\nQuit the console?"
+    : "Quit the console?";
+  if (!confirm(msg)) return;
+  document.body.innerHTML =
+    '<div style="margin:140px auto;text-align:center;font-size:15px;color:#6b7280">' +
+    "Console closed. You can close this tab.</div>";
+  try { await post("/api/quit"); } catch(e) {}
+});
+
+poll();
+setInterval(poll, 1500);
+tickClock();
+setInterval(tickClock, 100);
+</script>
+</body>
+</html>

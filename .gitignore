@@ -1,0 +1,25 @@
+# Upstream runner: download and extract it yourself, never commit it.
+/math-gambling/
+/math-gambling-runner-*.zip
+/RUNNER_SETUP.md
+/runner-release.json
+/SHA256SUMS.txt
+
+# Local runtime state. These files hold your credit name, your GitHub
+# username and the actual computation results.
+/config.json
+/logs/
+/app/.instance.json
+/math-gambling-run/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+/results.jsonl
+
+# Python
+__pycache__/
+*.pyc
+
+# Local-only notes
+/GUI-amendment.md
+/TODO.md
