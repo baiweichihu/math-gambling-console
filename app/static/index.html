@@ -82,6 +82,42 @@
   .stat{background:var(--soft);border-radius:9px;padding:13px 8px;text-align:center}
   .stat .k{color:var(--dim);font-size:11px;letter-spacing:.2px;margin-bottom:5px}
   .stat .v{font-size:21px;font-weight:650;font-variant-numeric:tabular-nums}
+  .stat .sub2{color:var(--faint);font-size:10.5px;margin-top:3px;
+    font-variant-numeric:tabular-nums;line-height:1.35}
+
+  /* alert strip */
+  .alert{
+    display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;
+    background:#fffbeb;border:1px solid #fde68a;color:#92400e;
+    border-radius:9px;padding:9px 12px;margin-bottom:14px;font-size:12.5px;
+    text-align:center;
+  }
+  .alert[hidden]{display:none}
+  .alert.network{background:#fef2f2;border-color:#fecaca;color:#b91c1c}
+  .alert button{
+    padding:4px 13px;border-radius:6px;border:1px solid #d97706;background:#fff;
+    color:#92400e;font:inherit;font-size:12px;font-weight:600;cursor:pointer;
+  }
+  .alert button:hover{background:#fef3c7}
+  .alert.network button{border-color:#dc2626;color:#b91c1c}
+  .alert.network button:hover{background:#fee2e2}
+
+  /* settings toggle */
+  .toggleRow{display:flex;align-items:flex-start;gap:12px;margin-top:16px;
+    padding-top:16px;border-top:1px solid var(--line)}
+  .switch{position:relative;display:inline-block;flex:0 0 auto;width:38px;height:22px;
+    margin-top:1px;cursor:pointer}
+  .switch input{position:absolute;opacity:0;width:0;height:0}
+  .switch .track{position:absolute;inset:0;background:#d5dae1;border-radius:999px;
+    transition:background .18s}
+  .switch .track::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;
+    background:#fff;border-radius:50%;box-shadow:0 1px 2px rgba(16,24,40,.2);
+    transition:transform .18s}
+  .switch input:checked + .track{background:var(--accent)}
+  .switch input:checked + .track::after{transform:translateX(16px)}
+  .switch input:disabled + .track{opacity:.5;cursor:not-allowed}
+  .toggleRow .tLabel{font-size:12.5px;font-weight:600;color:var(--fg)}
+  .toggleRow .tiny{margin-top:3px}
   .bar{height:7px;border-radius:4px;background:#eceff3;overflow:hidden;margin-top:16px}
   .bar > i{display:block;height:100%;width:0;background:var(--accent);
     border-radius:4px;transition:width .45s ease}
@@ -234,15 +270,24 @@
       <button id="btnStop" class="danger">Stop</button>
       <button id="btnSubmit">Submit</button>
     </div>
+    <div class="hint" id="runtime">Total runtime 0.00 h</div>
   </section>
 
   <!-- 4 -->
   <section class="card">
+    <div class="alert" id="alert" hidden>
+      <span id="alertText"></span>
+      <button id="btnRetry" hidden>Retry</button>
+    </div>
     <div class="stats">
       <div class="stat"><div class="k">Done this run</div><div class="v" id="tasks">0</div></div>
       <div class="stat"><div class="k">Pending results</div><div class="v" id="banks">0</div></div>
       <div class="stat"><div class="k">Submitted</div><div class="v" id="submitted">0</div></div>
-      <div class="stat"><div class="k">Total done</div><div class="v" id="total">0</div></div>
+      <div class="stat">
+        <div class="k">Total</div>
+        <div class="v" id="totalTasks">0</div>
+        <div class="sub2"><span id="totalBanks">0</span> banks<br><span id="totalInputs">0</span> inputs</div>
+      </div>
     </div>
     <div class="bar" id="capbar"><i id="capfill"></i></div>
     <div class="hint" id="caphint">Local unsubmitted tasks 0 / 4096</div>
@@ -266,6 +311,19 @@
         <label for="name">Credit name</label>
         <input type="text" id="name" maxlength="80" placeholder="Your name">
         <div class="tiny" id="namehint">Locked after first run</div>
+      </div>
+    </div>
+    <div class="toggleRow">
+      <label class="switch">
+        <input type="checkbox" id="autoSubmit">
+        <span class="track"></span>
+      </label>
+      <div>
+        <div class="tLabel">Auto-submit when the 4096 cap is reached</div>
+        <div class="tiny">
+          Submits the queue, then starts the next round by itself. Publishes public GitHub
+          issues without asking each time.
+        </div>
       </div>
     </div>
   </section>
@@ -326,6 +384,16 @@ function toast(msg, kind){
 }
 
 const fmt = n => (n || 0).toLocaleString("en-US");
+
+/* Compact form for counters that reach the millions (inputs). */
+function compact(n){
+  n = n || 0;
+  const trim = (v, d) => v.toFixed(d).replace(/\.?0+$/, "");
+  if (n >= 1e9) return trim(n / 1e9, 2) + " B";
+  if (n >= 1e6) return trim(n / 1e6, 2) + " M";
+  if (n >= 1e4) return trim(n / 1e3, 1) + " K";
+  return fmt(Math.round(n));
+}
 
 function hms(sec){
   sec = Math.max(0, Math.floor(sec || 0));
@@ -438,6 +506,7 @@ function pillOf(st){
     stopping:    ["Stopping…", "warn"],
     submitting:  ["Submitting…", "warn"],
     paused_cap:  ["Limit reached", "warn"],
+    retrying:    ["Retrying…", "warn"],
     found:       ["Discovery!", "on"],
     error:       ["Error", "bad"]
   }[st] || [st, ""];
@@ -456,7 +525,13 @@ function render(s){
   $("tasks").textContent = fmt(s.counter.tasks_done);
   $("banks").textContent = fmt(s.db ? s.db.pending_banks : 0);
   $("submitted").textContent = fmt(s.db ? s.db.submitted_banks : 0);
-  $("total").textContent = fmt(s.db ? s.db.total_tasks : 0);
+
+  const totals = s.totals || {};
+  $("totalTasks").textContent = fmt(totals.tasks);
+  $("totalBanks").textContent = fmt(totals.banks);
+  $("totalInputs").textContent = compact(totals.inputs);
+  $("runtime").textContent =
+    "Total runtime " + (s.runtime ? s.runtime.total_hours : 0).toFixed(2) + " h";
 
   const unbanked = s.db ? s.db.unbanked : 0;
   const limit = s.limits.outbox_limit;
@@ -466,6 +541,22 @@ function render(s){
   let capHint = `Local unsubmitted tasks ${fmt(unbanked)} / ${fmt(limit)}`;
   if (pct >= 75) capHint += " — computing stops at the limit; submit to continue";
   $("caphint").textContent = capHint;
+
+  let alertText = "", canRetry = false;
+  if (st === "retrying"){
+    const r = s.retry || {};
+    alertText = "Network error — retrying automatically (" +
+      (r.attempts || 0) + "/" + (r.max || 0) + ")…";
+  } else if (st === "paused_cap"){
+    alertText = s.last_error || "Local unsubmitted tasks reached the 4096 cap.";
+  } else if (st === "error"){
+    alertText = s.last_error || "The run failed; see the log below.";
+    canRetry = true;
+  }
+  $("alert").hidden = !alertText;
+  $("alert").className = "alert" + (s.error_kind === "network" ? " network" : "");
+  $("alertText").textContent = alertText;
+  $("btnRetry").hidden = !canRetry;
 
   // Settings: locked while the runner is alive.
   // Once the user edits a setting the server value must not overwrite it.
@@ -487,6 +578,9 @@ function render(s){
     ? "Locked — stored in checkpoint"
     : "Locked after first run";
 
+  const cb = $("autoSubmit");
+  if (document.activeElement !== cb) cb.checked = !!s.auto_submit;
+
   // discovery
   const disc = (s.db && s.db.discoveries && s.db.discoveries[0]) || null;
   $("banner").hidden = !disc;
@@ -498,8 +592,8 @@ function render(s){
     closeVeil();
   }
 
-  $("btnStart").disabled = running || !s.paths.runner;
-  $("btnStop").disabled = !running;
+  $("btnStart").disabled = running || st === "retrying" || !s.paths.runner;
+  $("btnStop").disabled = !running && st !== "retrying";
   $("btnSubmit").disabled = running || !s.github || !(s.db && s.db.pending_banks > 0);
 
   const who = s.github
@@ -572,6 +666,32 @@ $("btnStop").addEventListener("click", async () => {
 
 $("btnSubmit").addEventListener("click", doSubmit);
 $("btnVeilSubmit").addEventListener("click", doSubmit);
+
+$("autoSubmit").addEventListener("change", async (e) => {
+  const on = e.target.checked;
+  if (on && !confirm(
+    "Auto-submit publishes your results as public GitHub issues by itself, " +
+    "whenever the 4096 cap is reached, without asking each time.\n\nEnable it?"
+  )){
+    e.target.checked = false;
+    return;
+  }
+  busy = true;
+  try { await post("/api/settings", {auto_submit: on}); }
+  finally { busy = false; poll(); }
+});
+
+$("btnRetry").addEventListener("click", async () => {
+  busy = true;
+  try{
+    const r = await post("/api/start", {
+      workers: +$("workers").value,
+      minutes: +$("minutes").value,
+      name: $("name").value
+    });
+    if (!r.ok) toast(r.error);
+  } finally { busy = false; poll(); }
+});
 
 $("btnShowVeil").addEventListener("click", () => {
   const d = currentDiscovery || (S && S.db && S.db.discoveries && S.db.discoveries[0]);
