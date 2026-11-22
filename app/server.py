@@ -31,6 +31,8 @@ RUNNER = RUNNER_DIR / "tools" / "runner.py"
 OUT_DIR = RUNNER_DIR / "math-gambling-run"
 DB_FILE = OUT_DIR / "checkpoint.sqlite3"
 CONFIG_FILE = ROOT / "config.json"
+STATE_FILE = ROOT / "state.json"
+RESULTS_FILE = OUT_DIR / "results.jsonl"
 LOG_FILE = ROOT / "logs" / "console.log"
 STATIC = Path(__file__).resolve().parent / "static"
 
@@ -40,6 +42,11 @@ DEFAULT_WORKERS = max(1, min(4, CPU // 2))
 MAX_MINUTES = 1440          # upstream hard limit
 OUTBOX_LIMIT = 4096         # upstream cap on unsubmitted tasks
 SUBMIT_MAX_ROUNDS = 6       # max drain rounds per Submit action
+
+RETRY_DELAYS = (15, 30, 60)     # seconds between automatic retries
+RETRY_MAX = 4                   # consecutive automatic retries before giving up
+HEARTBEAT = 30.0                # how often the in-progress runtime is persisted
+SCAN_THROTTLE = 5.0             # min seconds between results.jsonl state writes
 
 # Fixed arguments that the UI does not expose. This console targets k=114
 # only, so the upstream cross-target slice is always disabled.
@@ -81,6 +88,155 @@ def save_config(data):
         CONFIG_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError:
         pass
+
+
+# ------------------------------------------------------------ persistent state
+# state.json survives restarts and holds the accumulated runtime, the
+# results.jsonl scan cursor and the auto-submit preference.
+
+_STATE_LOCK = threading.RLock()
+_STATE = {}
+
+
+def load_state():
+    try:
+        value = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state():
+    try:
+        STATE_FILE.write_text(json.dumps(_STATE, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def total_seconds():
+    with _STATE_LOCK:
+        return float(_STATE.get("total_seconds") or 0.0)
+
+
+def add_elapsed(seconds):
+    if not seconds or seconds <= 0:
+        return
+    with _STATE_LOCK:
+        _STATE["total_seconds"] = round(float(_STATE.get("total_seconds") or 0.0) + seconds, 3)
+        _STATE["sessions"] = int(_STATE.get("sessions") or 0) + 1
+        save_state()
+
+
+def set_in_progress(seg, seconds):
+    with _STATE_LOCK:
+        _STATE["in_progress"] = {"seg": seg, "seconds": round(seconds, 3)}
+        save_state()
+
+
+def clear_in_progress():
+    with _STATE_LOCK:
+        if _STATE.get("in_progress") is not None:
+            _STATE["in_progress"] = None
+            save_state()
+
+
+def recover_interrupted_segment():
+    """A previous process died mid-run, so its final stretch was never banked.
+
+    Fold the last heartbeat into the total instead of losing it.
+    """
+    with _STATE_LOCK:
+        pending = _STATE.get("in_progress")
+        if not isinstance(pending, dict):
+            _STATE["in_progress"] = None
+            return 0.0
+        seconds = float(pending.get("seconds") or 0.0)
+        _STATE["in_progress"] = None
+        if seconds > 0:
+            _STATE["total_seconds"] = round(float(_STATE.get("total_seconds") or 0.0) + seconds, 3)
+        save_state()
+        return seconds
+
+
+def auto_submit_enabled():
+    with _STATE_LOCK:
+        return bool(_STATE.get("auto_submit"))
+
+
+def set_auto_submit(flag):
+    with _STATE_LOCK:
+        _STATE["auto_submit"] = bool(flag)
+        save_state()
+
+
+# results.jsonl counter key -> name used by the UI
+_SCAN_FIELDS = {
+    "generators": "inputs",
+    "curves": "curves",
+    "exact_tests": "exact_tests",
+    "quotient_points": "q_positions",
+}
+
+
+def scan_totals():
+    """Incrementally sum the per-task counters in results.jsonl.
+
+    The file is append-only, so the byte offset already consumed is remembered and
+    only the new tail is parsed. A shrinking file means it was replaced: rescan.
+    The persisted (offset, sums) pair is always written together, so a crash can
+    only lose the tail, never double count it.
+    """
+    with _STATE_LOCK:
+        scan = dict(_STATE.get("scan") or {})
+        offset = int(scan.get("offset") or 0)
+        sums = {dst: int(scan.get(dst) or 0) for dst in _SCAN_FIELDS.values()}
+        saved_at = float(scan.get("saved_at") or 0.0)
+
+    try:
+        size = RESULTS_FILE.stat().st_size
+    except OSError:
+        return sums
+
+    if size < offset:                      # truncated or replaced
+        offset = 0
+        sums = {dst: 0 for dst in _SCAN_FIELDS.values()}
+
+    if size <= offset:
+        return sums
+
+    try:
+        with RESULTS_FILE.open("rb") as fh:
+            fh.seek(offset)
+            chunk = fh.read(size - offset)
+    except OSError:
+        return sums
+
+    end = chunk.rfind(b"\n")               # never consume a partial line
+    if end < 0:
+        return sums
+
+    consumed = end + 1
+    for line in chunk[:consumed].splitlines():
+        if not line.strip():
+            continue
+        try:
+            counters = json.loads(line).get("counters") or {}
+        except (ValueError, AttributeError):
+            continue
+        for src, dst in _SCAN_FIELDS.items():
+            sums[dst] += int(counters.get(src) or 0)
+    offset += consumed
+
+    now = time.time()
+    with _STATE_LOCK:
+        _STATE["scan"] = dict(sums, offset=offset, saved_at=saved_at)
+        if now - saved_at >= SCAN_THROTTLE:
+            _STATE["scan"]["saved_at"] = now
+            save_state()
+    return sums
+
+
+_STATE.update(load_state())
 
 
 def gh_identity():
@@ -224,6 +380,7 @@ def db_stats():
 
         return {
             "unbanked": (unbanked or 0) + (unbanked_target or 0),
+            "banks_total": scalar("SELECT count(*) FROM banks") or 0,
             "pending_banks": scalar("SELECT count(*) FROM banks WHERE submitted IS NULL") or 0,
             "uncertain_banks": scalar(
                 "SELECT count(*) FROM banks WHERE submitted LIKE 'uncertain;%'"
@@ -265,7 +422,14 @@ class Console:
         self.tasks_at_start = 0
         self.exit_code = None
         self.version = ""
+        self.seg_id = ""
+        self.retry_token = 0
+        self.retry_attempts = 0
+        self.auto_pending = False
+        self.error_kind = ""
+        self.scan_cache = (0.0, {})
         threading.Thread(target=self._init_identity, daemon=True).start()
+        threading.Thread(target=self._heartbeat, daemon=True).start()
 
     # -- init
 
@@ -280,6 +444,48 @@ class Console:
                 self.name = saved["name"]
             elif not self.name:
                 self.name = self.display_name
+
+    # -- runtime accounting
+
+    def _elapsed(self):
+        with self.lock:
+            if self.started_at is None:
+                return 0.0
+            end = self.finished_at if self.finished_at else time.monotonic()
+            return max(0.0, end - self.started_at)
+
+    def _heartbeat(self):
+        """Persist the in-progress runtime so a hard kill loses at most HEARTBEAT."""
+        while True:
+            time.sleep(HEARTBEAT)
+            try:
+                with self.lock:
+                    alive = self.proc is not None and self.proc.poll() is None
+                    seg = self.seg_id
+                if alive and seg:
+                    set_in_progress(seg, self._elapsed())
+            except Exception:                      # never let the heartbeat die
+                pass
+
+    def _schedule_retry(self):
+        with self.lock:
+            self.retry_attempts += 1
+            attempt = self.retry_attempts
+            self.retry_token += 1
+            token = self.retry_token
+            self.status = "retrying"
+            delay = RETRY_DELAYS[min(attempt - 1, len(RETRY_DELAYS) - 1)]
+        self._emit(f">> network error; retrying in {delay}s (attempt {attempt}/{RETRY_MAX})")
+
+        def worker():
+            time.sleep(delay)
+            with self.lock:
+                if self.retry_token != token or self.user_stop:
+                    return
+                self.status = "idle"
+            self.start_run(self.workers, self.minutes, self.name, relay=True)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # -- internals
 
@@ -321,6 +527,9 @@ class Console:
             if "Outbox capacity reached" in line:
                 self.cap_hit = True
                 return
+            if line.startswith("Scheduling log:"):
+                self.seg_id = line.rsplit("\\", 1)[-1].rsplit("/", 1)[-1].replace(".jsonl", "")
+                return
             m = re.match(r"^Math Gambling ([\d.]+) \|", line)
             if m:
                 self.version = m.group(1)
@@ -338,6 +547,8 @@ class Console:
             self.exit_code = None
             self.user_stop = False
             self.cap_hit = False
+            self.error_kind = ""
+            self.seg_id = f"seg-{int(time.time() * 1000)}"
             self.tasks_at_start = base.get("total_tasks", 0)
             self.started_at = time.monotonic()
             self.finished_at = None
@@ -345,6 +556,8 @@ class Console:
             self.progress = {}
             self.counter = {"banks_written": 0, "submitted": 0, "tasks_done": 0}
             self.status = "running" if mode == "run" else "submitting"
+            if mode == "run":
+                self.auto_pending = False
         proc = subprocess.Popen(
             cmd, cwd=str(RUNNER_DIR), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", bufsize=1, env=env,
@@ -382,6 +595,8 @@ class Console:
             self.minutes = minutes
             if not relay:
                 self.relay = 0
+                self.retry_attempts = 0
+                self.retry_token += 1      # a manual start cancels any pending retry
             if not locked:
                 self.name = name
         if not locked:
@@ -443,12 +658,24 @@ class Console:
 
     def stop(self):
         with self.lock:
-            proc = self.proc
-            if proc is None or proc.poll() is not None:
-                return False, "nothing is running"
-            self.user_stop = True
-            if self.status in ("running", "submitting"):
-                self.status = "stopping"
+            if self.status == "retrying":
+                self.retry_token += 1          # cancel the pending automatic retry
+                self.user_stop = True
+                self.status = "idle"
+                cancelled = True
+                proc = None
+            else:
+                cancelled = False
+                proc = self.proc
+                if proc is None or proc.poll() is not None:
+                    return False, "nothing is running"
+                self.user_stop = True
+                self.auto_pending = False
+                if self.status in ("running", "submitting"):
+                    self.status = "stopping"
+        if cancelled:
+            self._emit(">> automatic retry cancelled")
+            return True, ""
         if not send_ctrl_c(proc.pid):
             return False, "could not send the stop signal"
         self._emit(">> stop signal sent, waiting for the current task to finish…")
@@ -466,12 +693,16 @@ class Console:
             stopped_by_user = self.user_stop
             elapsed = (self.finished_at - self.started_at) if self.started_at else 0
             minutes = self.minutes
+            auto_next = self.auto_pending
+            recent = "\n".join(list(self.log)[-40:])
 
         self._emit(f">> process exited with code {rc}")
+        if elapsed > 0:
+            add_elapsed(elapsed)
+            clear_in_progress()
 
         if mode == "submit":
-            stats = db_stats() or {}
-            pending = stats.get("pending_banks", 0)
+            pending = (db_stats() or {}).get("pending_banks", 0)
             with self.lock:
                 self.submit_rounds += 1
                 rounds = self.submit_rounds
@@ -480,27 +711,72 @@ class Console:
                 self.start_submit()
                 return
             with self.lock:
-                self.status = "idle" if rc == 0 else "error"
                 self.submit_rounds = 0
+                self.auto_pending = False
+                if rc != 0:
+                    self.status = "error"
+                    self.error_kind = "generic"
+                    self.last_error = "Submitting failed; see the log below."
+                else:
+                    self.status = "idle"
+                    self.error_kind = ""
+            if auto_next and rc == 0 and not stopped_by_user:
+                self._emit(">> queue drained; continuing with the next compute round…")
+                self.start_run(self.workers, self.minutes, self.name, relay=True)
             return
+
+        network = rc != 0 and any(token in recent for token in (
+            "Coverage download unavailable",
+            "Coverage refresh failed",
+            "Coverage unavailable",
+        ))
+        cap_auto = bool(cap and not stopped_by_user and auto_submit_enabled())
 
         with self.lock:
             self.submit_rounds = 0
+            relay = False
+            segment = 0
             if found:
                 self.status = "found"
+                self.error_kind = ""
+            elif rc == 0 and stopped_by_user:
+                self.status = "idle"
+                self.error_kind = ""
+            elif cap_auto:
+                self.status = "submitting"
+                self.error_kind = ""
+                self.auto_pending = True
+            elif cap:
+                self.status = "paused_cap"
+                self.error_kind = "cap"
+                self.last_error = ("Local unsubmitted tasks reached the 4096 cap. "
+                                   "Submit to continue.")
+            elif network:
+                self.status = "error"
+                self.error_kind = "network"
+                self.last_error = ("Network error while fetching the upstream coverage "
+                                   "index. Finished work is saved.")
             elif rc != 0:
                 self.status = "error"
-                self.last_error = "the run failed; see the log below"
-            elif cap and not stopped_by_user:
-                self.status = "paused_cap"
+                self.error_kind = "generic"
+                self.last_error = "The run failed; see the log below."
             else:
                 self.status = "idle"
-            # Relay automatically when the time cap is reached (only at 1440 minutes).
-            relay = bool(rc == 0 and not stopped_by_user and not found and not cap
-                         and minutes and elapsed >= minutes * 60 * 0.95)
-            if relay:
+                self.error_kind = ""
+                self.retry_attempts = 0
+            if (rc == 0 and not stopped_by_user and not found and not cap
+                    and minutes and elapsed >= minutes * 60 * 0.95):
+                relay = True
                 self.relay += 1
                 segment = self.relay
+
+        if cap_auto:
+            self._emit(">> outbox cap reached and auto-submit is on; submitting, then continuing…")
+            self.start_submit()
+            return
+        if network and not stopped_by_user and self.retry_attempts < RETRY_MAX:
+            self._schedule_retry()
+            return
         if relay:
             self._emit(f">> time cap reached, continuing automatically (segment {segment})…")
             self.start_run(self.workers, self.minutes, self.name, relay=True)
@@ -542,7 +818,28 @@ class Console:
         # After a stop the progress line stops updating; correct it from the checkpoint.
         if not running and stats:
             snap["counter"]["tasks_done"] = max(0, stats["total_tasks"] - tasks_at_start)
+        counters = scan_totals()
+        elapsed_total = total_seconds()
+        with self.lock:
+            error_kind = self.error_kind
+            auto_pending = self.auto_pending
+            attempts = self.retry_attempts
         snap.update({
+            "runtime": {
+                "total_seconds": round(elapsed_total, 1),
+                "total_hours": round(elapsed_total / 3600.0, 2),
+            },
+            "totals": {
+                "tasks": (stats or {}).get("total_tasks", 0),
+                "banks": (stats or {}).get("banks_total", 0),
+                "inputs": counters.get("inputs", 0),
+                "curves": counters.get("curves", 0),
+                "exact_tests": counters.get("exact_tests", 0),
+            },
+            "auto_submit": auto_submit_enabled(),
+            "auto_pending": auto_pending,
+            "error_kind": error_kind,
+            "retry": {"attempts": attempts, "max": RETRY_MAX},
             "limits": {
                 "max_workers": MAX_WORKERS,
                 "default_workers": DEFAULT_WORKERS,
@@ -631,6 +928,10 @@ class Handler(BaseHTTPRequestHandler):
             ok, err = CONSOLE.stop()
         elif self.path == "/api/submit":
             ok, err = CONSOLE.start_submit()
+        elif self.path == "/api/settings":
+            if "auto_submit" in body:
+                set_auto_submit(bool(body["auto_submit"]))
+            ok, err = True, ""
         elif self.path == "/api/quit":
             self._send(200, {"ok": True, "error": ""})
             threading.Thread(target=quit_console, daemon=True).start()
@@ -670,6 +971,9 @@ def main():
     log_to_file(f"console starting | python {sys.version.split()[0]} | cpu={CPU}")
     if not RUNNER.exists():
         log_to_file(f"warning: {RUNNER} not found")
+    recovered = recover_interrupted_segment()
+    if recovered > 0:
+        log_to_file(f"recovered {recovered:.0f}s of runtime from an interrupted session")
 
     if IS_WINDOWS:
         # Stopping broadcasts CTRL_C_EVENT to the whole console group, so the
